@@ -32,7 +32,8 @@ jobs:
             libc6-dev-armhf-cross
       - name: Generate Build Metadata
         run: |
-          echo VERSION=`git rev-parse --short HEAD` >> $GITHUB_ENV
+          # echo VERSION=`git rev-parse --short HEAD` >> $GITHUB_ENV
+          echo VERSION=`date -u +%Y%m%d` >> $GITHUB_ENV
           echo COMMIT=`git rev-parse --short HEAD` >> $GITHUB_ENV
           echo BUILD_DATE=`date -u +%Y-%m-%dT%H:%M:%SZ` >> $GITHUB_ENV
       - name: Build (linux/arm/v7)
@@ -42,7 +43,7 @@ jobs:
           GOARM: "7"
           CGO_ENABLED: "0"
         run: |
-          go build -ldflags="-s -w -X 'main.Version=${VERSION}-plus' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" -o cli-proxy-api-plus-linux-armv7 ./cmd/server/
+          go build -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" -o cli-proxy-api-plus-linux-armv7 ./cmd/server/
       - name: Package tar.gz
         run: |
           tar -czf cli-proxy-api-plus-linux-armv7.tar.gz \
