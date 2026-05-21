@@ -40,15 +40,23 @@ type releaseInfo struct {
 func (h *Handler) GetLatestVersion(c *gin.Context) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	proxyURL := ""
+	
+	// 1. 获取自定义更新地址，默认使用常量
+	targetURL := latestReleaseURL 
+
 	if h != nil && h.cfg != nil {
 		proxyURL = strings.TrimSpace(h.cfg.ProxyURL)
+		// 如果配置了自定义 URL，则覆盖默认值
+		if customURL := strings.TrimSpace(h.cfg.UpdateURL); customURL != "" {
+			targetURL = customURL
+		}
 	}
 	if proxyURL != "" {
 		sdkCfg := &sdkconfig.SDKConfig{ProxyURL: proxyURL}
 		util.SetProxy(sdkCfg, client)
 	}
 
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, latestReleaseURL, nil)
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, targetURL, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "request_create_failed", "message": err.Error()})
 		return

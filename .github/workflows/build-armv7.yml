@@ -1,7 +1,15 @@
 name: build-armv7
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
+    inputs:
+      custom_version:
+        description: '指定版本号 (可选，例如: v1.2.3)。如果不填，将自动使用当前日期。'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -12,15 +20,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        
       - name: Refresh models catalog
         run: |
           git fetch --depth 1 https://github.com/router-for-me/models.git main
           git show FETCH_HEAD:models.json > internal/registry/models/models.json
+          
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+          
       - name: Install ARMv7 toolchain
         run: |
           sudo apt-get update
@@ -30,12 +41,22 @@ jobs:
             gcc-arm-linux-gnueabihf \
             g++-arm-linux-gnueabihf \
             libc6-dev-armhf-cross
+            
       - name: Generate Build Metadata
         run: |
-          # echo VERSION=`git rev-parse --short HEAD` >> $GITHUB_ENV
-          echo VERSION=`date -u +%Y%m%d` >> $GITHUB_ENV
+          # 检查是否在手动运行时指定了自定义版本
+          CUSTOM_VERSION="${{ inputs.custom_version }}"
+          
+          if [ -n "$CUSTOM_VERSION" ]; then
+            echo "VERSION=$CUSTOM_VERSION" >> $GITHUB_ENV
+          else
+            # 如果没有指定（或由 push 触发），则使用当前日期
+            echo VERSION=`date -u +%Y%m%d` >> $GITHUB_ENV
+          fi
+          
           echo COMMIT=`git rev-parse --short HEAD` >> $GITHUB_ENV
           echo BUILD_DATE=`date -u +%Y-%m-%dT%H:%M:%SZ` >> $GITHUB_ENV
+          
       - name: Build (linux/arm/v7)
         env:
           GOOS: linux
@@ -44,6 +65,7 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           go build -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" -o cli-proxy-api-plus-linux-armv7 ./cmd/server/
+          
       - name: Package tar.gz
         run: |
           tar -czf cli-proxy-api-plus-linux-armv7.tar.gz \
@@ -52,6 +74,7 @@ jobs:
             README.md \
             README_CN.md \
             config.example.yaml
+            
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

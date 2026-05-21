@@ -1,0 +1,24 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    # 这里的 cron 表达式使用 UTC 时间
+    # UTC 00:00 对应北京时间 (UTC+8) 早上 08:00
+    - cron: '0 0 * * *'
+  # 保留手动触发选项，方便随时手动拉取最新代码
+  workflow_dispatch:
+
+permissions:
+  contents: write # 必须赋予写入权限才能更新代码
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync and merge upstream repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 自动将当前仓库与它的上游仓库进行同步
+          # 如果主分支叫 master，请将下面的 main 改为 master
+          gh repo sync ${{ github.repository }} --branch main
