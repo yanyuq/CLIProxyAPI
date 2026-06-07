@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # 必须赋予写入权限才能更新代码
+  contents: write # 保持此权限
 
 jobs:
   sync:
@@ -17,7 +17,8 @@ jobs:
     steps:
       - name: Sync and merge upstream repository
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 关键修改：更换为具有 workflow 权限的自定义 PAT
+          GH_TOKEN: ${{ secrets.SYNC_PAT }} 
         run: |
           # 自动将当前仓库与它的上游仓库进行同步
           # 如果主分支叫 master，请将下面的 main 改为 master
