@@ -33,36 +33,16 @@ typedef struct {
 extern int cliproxyPluginCall(char*, uint8_t*, size_t, cliproxy_buffer*);
 extern void cliproxyPluginFree(void*, size_t);
 extern void cliproxyPluginShutdown(void);
-
-static const cliproxy_host_api* stored_host;
-
-static void store_host_api(const cliproxy_host_api* host) {
-	stored_host = host;
-}
-
-static int call_host_api(const char* method, const uint8_t* request, size_t request_len, cliproxy_buffer* response) {
-	if (stored_host == NULL || stored_host->call == NULL) {
-		return 1;
-	}
-	return stored_host->call(stored_host->host_ctx, method, request, request_len, response);
-}
-
-static void free_host_buffer(void* ptr, size_t len) {
-	if (stored_host != NULL && stored_host->free_buffer != NULL && ptr != NULL) {
-		stored_host->free_buffer(ptr, len);
-	}
-}
 */
 import "C"
 
 import (
 	"encoding/json"
-	"net/http"
-	"time"
 	"unsafe"
-)
 
-const abiVersion uint32 = 1
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+)
 
 type envelope struct {
 	OK     bool            `json:"ok"`
@@ -75,15 +55,30 @@ type envelopeError struct {
 	Message string `json:"message"`
 }
 
+type registration struct {
+	SchemaVersion uint32             `json:"schema_version"`
+	Metadata      pluginapi.Metadata `json:"metadata"`
+	Capabilities  capabilities       `json:"capabilities"`
+}
+
+type capabilities struct {
+	FrontendAuthProvider          bool `json:"frontend_auth_provider"`
+	FrontendAuthProviderExclusive bool `json:"frontend_auth_provider_exclusive"`
+}
+
+type identifierResponse struct {
+	Identifier string `json:"identifier"`
+}
+
 func main() {}
 
 //export cliproxy_plugin_init
 func cliproxy_plugin_init(host *C.cliproxy_host_api, plugin *C.cliproxy_plugin_api) C.int {
+	_ = host
 	if plugin == nil {
 		return 1
 	}
-	C.store_host_api(host)
-	plugin.abi_version = C.uint32_t(abiVersion)
+	plugin.abi_version = C.uint32_t(pluginabi.ABIVersion)
 	plugin.call = C.cliproxy_plugin_call_fn(C.cliproxyPluginCall)
 	plugin.free_buffer = C.cliproxy_plugin_free_fn(C.cliproxyPluginFree)
 	plugin.shutdown = C.cliproxy_plugin_shutdown_fn(C.cliproxyPluginShutdown)
@@ -100,14 +95,16 @@ func cliproxyPluginCall(method *C.char, request *C.uint8_t, requestLen C.size_t,
 		writeResponse(response, errorEnvelope("invalid_method", "method is required"))
 		return 1
 	}
-	raw, errHandle := handleMethod(C.GoString(method))
+	var requestBytes []byte
+	if request != nil && requestLen > 0 {
+		requestBytes = C.GoBytes(unsafe.Pointer(request), C.int(requestLen))
+	}
+	raw, errHandle := handleMethod(C.GoString(method), requestBytes)
 	if errHandle != nil {
 		writeResponse(response, errorEnvelope("plugin_error", errHandle.Error()))
 		return 1
 	}
 	writeResponse(response, raw)
-	_ = request
-	_ = requestLen
 	return 0
 }
 
@@ -122,25 +119,61 @@ func cliproxyPluginFree(ptr unsafe.Pointer, len C.size_t) {
 //export cliproxyPluginShutdown
 func cliproxyPluginShutdown() {}
 
-func handleMethod(method string) ([]byte, error) {
-	_ = http.StatusOK
-	_ = time.Second
+func handleMethod(method string, request []byte) ([]byte, error) {
 	switch method {
-	case "plugin.register":
-		return okEnvelopeJSON("{\"schema_version\":1,\"metadata\":{\"Name\":\"example-management-api-go\",\"Version\":\"0.1.0\",\"Author\":\"router-for-me\",\"GitHubRepository\":\"https://github.com/router-for-me/CLIProxyAPI\",\"Logo\":\"https://example.invalid/example-management-api-go.png\",\"ConfigFields\":[]},\"capabilities\":{\"management_api\":true}}")
-	case "plugin.reconfigure":
-		return okEnvelopeJSON("{\"schema_version\":1,\"metadata\":{\"Name\":\"example-management-api-go\",\"Version\":\"0.1.0\",\"Author\":\"router-for-me\",\"GitHubRepository\":\"https://github.com/router-for-me/CLIProxyAPI\",\"Logo\":\"https://example.invalid/example-management-api-go.png\",\"ConfigFields\":[]},\"capabilities\":{\"management_api\":true}}")
-	case "management.register":
-		return okEnvelopeJSON("{\"resources\":[{\"Path\":\"/status\",\"Menu\":\"Management API\",\"Description\":\"CPA exposes this menu resource under /v0/resource/plugins/example-management-api-go/status.\"}]}")
-	case "management.handle":
-		return okEnvelopeJSON("{\"StatusCode\":200,\"Headers\":{\"content-type\":[\"text/html; charset=utf-8\"]},\"Body\":\"PCFkb2N0eXBlIGh0bWw+PHRpdGxlPk1hbmFnZW1lbnQgQVBJPC90aXRsZT48bWFpbj5NYW5hZ2VtZW50IEFQSSByZXNvdXJjZTwvbWFpbj4=\"}")
+	case pluginabi.MethodPluginRegister, pluginabi.MethodPluginReconfigure:
+		return okEnvelope(exampleRegistration())
+	case pluginabi.MethodFrontendAuthIdentifier:
+		return okEnvelope(identifierResponse{Identifier: "example-frontend-auth-exclusive-go"})
+	case pluginabi.MethodFrontendAuthAuthenticate:
+		return authenticate(request)
 	default:
 		return errorEnvelope("unknown_method", "unknown method: "+method), nil
 	}
 }
 
-func okEnvelopeJSON(result string) ([]byte, error) {
-	return json.Marshal(envelope{OK: true, Result: json.RawMessage(result)})
+func exampleRegistration() registration {
+	return registration{
+		SchemaVersion: pluginabi.SchemaVersion,
+		Metadata: pluginapi.Metadata{
+			Name:             "example-frontend-auth-exclusive-go",
+			Version:          "0.1.0",
+			Author:           "router-for-me",
+			GitHubRepository: "https://github.com/router-for-me/CLIProxyAPI",
+			Logo:             "https://example.invalid/example-frontend-auth-exclusive-go.png",
+			ConfigFields:     []pluginapi.ConfigField{},
+		},
+		Capabilities: capabilities{
+			FrontendAuthProvider:          true,
+			FrontendAuthProviderExclusive: true,
+		},
+	}
+}
+
+func authenticate(request []byte) ([]byte, error) {
+	var req pluginapi.FrontendAuthRequest
+	if errUnmarshal := json.Unmarshal(request, &req); errUnmarshal != nil {
+		return okEnvelope(pluginapi.FrontendAuthResponse{Authenticated: false})
+	}
+	if req.Headers.Get("X-Example-Frontend-Auth") != "exclusive" {
+		return okEnvelope(pluginapi.FrontendAuthResponse{Authenticated: false})
+	}
+	return okEnvelope(pluginapi.FrontendAuthResponse{
+		Authenticated: true,
+		Principal:     "example-frontend-auth-exclusive-go",
+		Metadata: map[string]string{
+			"mode":     "exclusive",
+			"provider": "example-frontend-auth-exclusive-go",
+		},
+	})
+}
+
+func okEnvelope(v any) ([]byte, error) {
+	raw, errMarshal := json.Marshal(v)
+	if errMarshal != nil {
+		return nil, errMarshal
+	}
+	return json.Marshal(envelope{OK: true, Result: raw})
 }
 
 func errorEnvelope(code, message string) []byte {
@@ -158,18 +191,4 @@ func writeResponse(response *C.cliproxy_buffer, raw []byte) {
 	}
 	response.ptr = ptr
 	response.len = C.size_t(len(raw))
-}
-
-func callHost(method string, payload []byte) {
-	cMethod := C.CString(method)
-	defer C.free(unsafe.Pointer(cMethod))
-	var response C.cliproxy_buffer
-	var req *C.uint8_t
-	if len(payload) > 0 {
-		req = (*C.uint8_t)(C.CBytes(payload))
-		defer C.free(unsafe.Pointer(req))
-	}
-	if C.call_host_api(cMethod, req, C.size_t(len(payload)), &response) == 0 && response.ptr != nil {
-		C.free_host_buffer(response.ptr, response.len)
-	}
 }
